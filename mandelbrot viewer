@@ -1,0 +1,147 @@
+import wx
+import cupy as cp
+import numpy as np
+from PIL import Image
+
+# Mandelbrot constants
+INITIAL_MAX_ITERATIONS = 200
+INITIAL_POWER = 2
+INITIAL_ZOOM = 1.0
+INITIAL_CENTER_X = 0.0
+INITIAL_CENTER_Y = 0.0
+
+# Set the GPU device
+device_id = 0  # Set the GPU device ID (0 for the first GPU)
+cp.cuda.Device(device_id).use()
+
+class MandelbrotViewerFrame(wx.Frame):
+    def __init__(self, parent):
+        super().__init__(parent, title="Mandelbrot Viewer", size=(400, 300))
+        panel = wx.Panel(self)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.power_label = wx.StaticText(panel, label="Power:")
+        self.power_input = wx.TextCtrl(panel, value=str(INITIAL_POWER))
+        self.max_iterations_label = wx.StaticText(panel, label="Max Iterations:")
+        self.max_iterations_input = wx.TextCtrl(panel, value=str(INITIAL_MAX_ITERATIONS))
+
+        self.center_x_label = wx.StaticText(panel, label="Center X:")
+        self.center_x_input = wx.TextCtrl(panel, value=str(INITIAL_CENTER_X))
+        self.center_y_label = wx.StaticText(panel, label="Center Y:")
+        self.center_y_input = wx.TextCtrl(panel, value=str(INITIAL_CENTER_Y))
+
+        generate_button = wx.Button(panel, label="Generate Mandelbrot")
+        generate_button.Bind(wx.EVT_BUTTON, self.on_generate_button_click)
+
+        sizer.Add(self.power_label, 0, wx.ALL, 10)
+        sizer.Add(self.power_input, 0, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(self.max_iterations_label, 0, wx.ALL, 10)
+        sizer.Add(self.max_iterations_input, 0, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(self.center_x_label, 0, wx.ALL, 10)
+        sizer.Add(self.center_x_input, 0, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(self.center_y_label, 0, wx.ALL, 10)
+        sizer.Add(self.center_y_input, 0, wx.EXPAND | wx.ALL, 10)
+        sizer.Add(generate_button, 0, wx.CENTER | wx.ALL, 10)
+
+        panel.SetSizer(sizer)
+
+    def on_generate_button_click(self, event):
+        power = float(self.power_input.GetValue())
+        max_iterations = int(self.max_iterations_input.GetValue())
+        center_x = float(self.center_x_input.GetValue())
+        center_y = float(self.center_y_input.GetValue())
+
+        viewer = MandelbrotViewer(None, power, max_iterations, center_x, center_y)
+        viewer.Show()
+
+class MandelbrotViewer(wx.Frame):
+    def __init__(self, parent, power, max_iterations, center_x, center_y):
+        super().__init__(parent, title="Mandelbrot Viewer", size=(800, 800))
+        self.power = power
+        self.max_iterations = max_iterations
+        self.center_x = center_x
+        self.center_y = center_y
+        self.zoom = INITIAL_ZOOM
+        self.create_parameters_ui()
+        self.update_picture()
+
+    def create_parameters_ui(self):
+        zoom_in_button = wx.Button(self, label="Zoom In")
+        zoom_in_button.Bind(wx.EVT_BUTTON, self.zoom_in)
+        zoom_out_button = wx.Button(self, label="Zoom Out")
+        zoom_out_button.Bind(wx.EVT_BUTTON, self.zoom_out)
+
+        move_left_button = wx.Button(self, label="Move Left")
+        move_left_button.Bind(wx.EVT_BUTTON, self.move_left)
+        move_right_button = wx.Button(self, label="Move Right")
+        move_right_button.Bind(wx.EVT_BUTTON, self.move_right)
+        move_up_button = wx.Button(self, label="Move Up")
+        move_up_button.Bind(wx.EVT_BUTTON, self.move_up)
+        move_down_button = wx.Button(self, label="Move Down")
+        move_down_button.Bind(wx.EVT_BUTTON, self.move_down)
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer.Add(zoom_in_button, 0, wx.ALL, 10)
+        sizer.Add(zoom_out_button, 0, wx.ALL, 10)
+        sizer.Add(move_left_button, 0, wx.ALL, 10)
+        sizer.Add(move_right_button, 0, wx.ALL, 10)
+        sizer.Add(move_up_button, 0, wx.ALL, 10)
+        sizer.Add(move_down_button, 0, wx.ALL, 10)
+
+        self.SetSizer(sizer)
+
+    def zoom_in(self, event):
+        self.zoom *= 1.5
+        self.update_picture()
+
+    def zoom_out(self, event):
+        self.zoom /= 1.5
+        self.update_picture()
+
+    def move_left(self, event):
+        self.center_x -= 0.1
+        self.update_picture()
+
+    def move_right(self, event):
+        self.center_x += 0.1
+        self.update_picture()
+
+    def move_up(self, event):
+        self.center_y += 0.1
+        self.update_picture()
+
+    def move_down(self, event):
+        self.center_y -= 0.1
+        self.update_picture()
+
+    def update_picture(self):
+        img = self.calculate_mandelbrot()
+        bitmap = wx.Bitmap.FromBufferRGBA(img.width, img.height, img.convert("RGBA").tobytes())
+        picture = wx.StaticBitmap(self, bitmap=bitmap)
+
+    def calculate_mandelbrot(self):
+        w, h = self.GetSize()
+        x, y = cp.meshgrid(cp.linspace(self.center_x - 2.0 / self.zoom, self.center_x + 2.0 / self.zoom, w),
+                           cp.linspace(self.center_y - 2.0 / self.zoom, self.center_y + 2.0 / self.zoom, h))
+        c = x + 1j * y
+        z = cp.zeros_like(c, dtype=cp.complex64)
+        img = cp.zeros_like(c, dtype=cp.float32)
+
+        for i in range(self.max_iterations):
+            z = cp.power(z, self.power) + c
+            mask = cp.abs(z) < 2.0
+            img += mask.astype(cp.float32)
+
+        # Convert the GPU array to a NumPy array
+        img = cp.asnumpy(img)
+        img = (img / self.max_iterations).astype(float)
+
+        # Create a PIL image
+        img = Image.fromarray((img * 255).astype(np.uint8))
+
+        return img
+
+if __name__ == '__main__':
+    app = wx.App()
+    MandelbrotViewerFrame(None).Show()
+    app.MainLoop()
